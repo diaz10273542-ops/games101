@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>THE RUST ROOM</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #000; font-family: 'Courier New', monospace; }
+        #instructions {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            display: flex; flex-direction: column; justify-content: center; align-items: center;
+            color: #800; background: rgba(0,0,0,0.95); z-index: 10; cursor: pointer;
+        }
+        #ui { position: absolute; bottom: 30px; left: 30px; color: #aaa; pointer-events: none; z-index: 5; }
+    </style>
+</head>
+<body>
+
+    <div id="instructions">
+        <h1>B A S E M E N T</h1>
+        <p>BY ZAYDON.</p>
+        <p>[ CLICK TO ENTER ]</p>
+    </div>
+
+    <div id="ui">
+        <h2 id="status">OBJECTIVE: Find the Key to unlock the door</h2>
+        <p id="subtext">WASD to Move | MOUSE to Look | E to Interact |ESC to exit</p>
+    </div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
+
+        const scene = new THREE.Scene();
+        scene.fog = new THREE.FogExp2(0x000000, 0.15);
+
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        document.body.appendChild(renderer.domElement);
+
+        const controls = new PointerLockControls(camera, document.body);
+        const instructions = document.getElementById('instructions');
+
+        instructions.addEventListener('click', () => controls.lock());
+        controls.addEventListener('lock', () => instructions.style.display = 'none');
+        controls.addEventListener('unlock', () => instructions.style.display = 'flex');
+
+        // --- TEXTURES ---
+        const canvas = document.createElement('canvas');
+        canvas.width = 64; canvas.height = 64;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#221100'; ctx.fillRect(0,0,64,64);
+        for(let i=0; i<100; i++) { ctx.fillStyle = '#330000'; ctx.fillRect(Math.random()*64, Math.random()*64, 2, 2); }
+        const wallTex = new THREE.CanvasTexture(canvas);
+        wallTex.repeat.set(2,2); wallTex.wrapS = wallTex.wrapT = THREE.RepeatWrapping;
+
+        // --- WALLS & COLLISION ARRAY ---
+        const walls = [];
+        const wallMat = new THREE.MeshStandardMaterial({ map: wallTex });
+
+        function createWall(x, z, w, d, color = null) {
+            const mat = color ? new THREE.MeshStandardMaterial({color: color}) : wallMat;
+            const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, 5, d), mat);
+            mesh.position.set(x, 2.5, z);
+            scene.add(mesh);
+            
+            // Create a bounding box for collision
+            const box = new THREE.Box3().setFromObject(mesh);
+            walls.push(box);
+        }
+
+        // Environment
+        const floor = new THREE.Mesh(new THREE.PlaneGeometry(60, 60), new THREE.MeshStandardMaterial({color: 0x111111}));
+        floor.rotation.x = -Math.PI/2; scene.add(floor);
+
+        // Boundary Walls
+        createWall(0, -30, 60, 1); // North
+        createWall(0, 30, 60, 1);  // South
+        createWall(-30, 0, 1, 60); // West
+        createWall(30, 0, 1, 60);  // East
+
+        // Maze Walls
+        createWall(-10, -10, 20, 1);
+        createWall(10, 10, 1, 20);
+
+        // Key and Door
+        let hasKey = false;
+        const keyMesh = new THREE.Mesh(new THREE.TorusGeometry(0.2, 0.05), new THREE.MeshStandardMaterial({color: 0xffff00}));
+        keyMesh.position.set(20, 1, 20); scene.add(keyMesh);
+
+        const doorMesh = new THREE.Mesh(new THREE.BoxGeometry(3, 4.5, 0.5), new THREE.MeshStandardMaterial({color: 0x440000}));
+        doorMesh.position.set(-25, 2.25, -29.2); scene.add(doorMesh);
+
+        // --- LIGHTS ---
+        const flashlight = new THREE.SpotLight(0xffffff, 40, 60, Math.PI/5, 0.3);
+        flashlight.castShadow = true;
+        scene.add(flashlight);
+        scene.add(flashlight.target);
+
+        // --- COLLISION LOGIC ---
+        function checkCollision(newPos) {
+            // Player is a small sphere for collision purposes
+            const playerBox = new THREE.Box3().setFromCenterAndSize(
+                newPos, 
+                new THREE.Vector3(0.8, 1.6, 0.8)
+            );
+            
+            for (let wall of walls) {
+                if (playerBox.intersectsBox(wall)) return true;
+            }
+            return false;
+        }
+
+        // --- MOVEMENT ---
+        const keys = {};
+        document.addEventListener('keydown', e => keys[e.code] = true);
+        document.addEventListener('keyup', e => keys[e.code] = false);
+
+        window.addEventListener('keydown', (e) => {
+            if (e.code === 'KeyE') {
+                if (camera.position.distanceTo(keyMesh.position) < 3) {
+                    hasKey = true; scene.remove(keyMesh);
+                    document.getElementById('status').innerText = "GO TO THE RED DOOR";
+                }
+                if (camera.position.distanceTo(doorMesh.position) < 4 && hasKey) {
+                    alert("YOU ESCAPED"); location.reload();
+                }
+            }
+        });
+
+        camera.position.set(0, 1.6, 0);
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            if (controls.isLocked) {
+                const oldPos = camera.position.clone();
+                
+                if (keys['KeyW']) controls.moveForward(0.12);
+                if (keys['KeyS']) controls.moveForward(-0.12);
+                if (keys['KeyA']) controls.moveRight(-0.12);
+                if (keys['KeyD']) controls.moveRight(0.12);
+
+                // If new position hits a wall, move back to old position
+                if (checkCollision(camera.position)) {
+                    camera.position.copy(oldPos);
+                }
+
+                flashlight.position.copy(camera.position);
+                const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+                flashlight.target.position.copy(camera.position).add(dir);
+            }
+
+            keyMesh.rotation.y += 0.02;
+            renderer.render(scene, camera);
+        }
+
+        animate();
+    </script>
+</body>
+</html>
